@@ -4519,10 +4519,7 @@
           branch: githubConfig.branch
         };
         if (currentFile && currentFile.sha) body.sha = currentFile.sha;
-        await githubRequest(`contents/${CLOUD_DATA_FILE}`, {
-          method: "PUT",
-          body: JSON.stringify(body)
-        });
+        await putCloudFileWithRetry(body);
         updateCloudStatus("云端已更新");
         if (options.manual) alert("已上传到 GitHub。GitHub Pages 通常需要几十秒到一两分钟生效。");
       } catch (error) {
@@ -4535,12 +4532,38 @@
       }
     }
 
-    async function getCloudFileSha() {
+    async function putCloudFileWithRetry(body) {
       try {
-        return await githubRequest(`contents/${CLOUD_DATA_FILE}?ref=${encodeURIComponent(githubConfig.branch)}`, {
-          method: "GET"
+        return await githubRequest(`contents/${CLOUD_DATA_FILE}`, {
+          method: "PUT",
+          body: JSON.stringify(body)
         });
       } catch (error) {
+        const message = error.userMessage || error.message || "";
+        if (error.status === 422 && message.includes("sha")) {
+          const publicFile = await getCloudFileSha({ publicRead: true });
+          if (publicFile && publicFile.sha) {
+            body.sha = publicFile.sha;
+            return githubRequest(`contents/${CLOUD_DATA_FILE}`, {
+              method: "PUT",
+              body: JSON.stringify(body)
+            });
+          }
+        }
+        throw error;
+      }
+    }
+
+    async function getCloudFileSha(options = {}) {
+      try {
+        return await githubRequest(`contents/${CLOUD_DATA_FILE}?ref=${encodeURIComponent(githubConfig.branch)}`, {
+          method: "GET",
+          auth: options.publicRead ? false : true
+        });
+      } catch (error) {
+        if (!options.publicRead && error.status === 404) {
+          return getCloudFileSha({ publicRead: true });
+        }
         if (error.status && error.status !== 404) throw error;
         return null;
       }
@@ -4551,7 +4574,7 @@
         ...options,
         headers: {
           "Accept": "application/vnd.github+json",
-          "Authorization": `Bearer ${githubConfig.token}`,
+          ...(options && options.auth === false ? {} : { "Authorization": `Bearer ${githubConfig.token}` }),
           "X-GitHub-Api-Version": "2022-11-28",
           ...(options && options.headers ? options.headers : {})
         }
