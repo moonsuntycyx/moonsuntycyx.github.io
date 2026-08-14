@@ -4527,8 +4527,11 @@
         if (options.manual) alert("已上传到 GitHub。GitHub Pages 通常需要几十秒到一两分钟生效。");
       } catch (error) {
         console.warn("Cloud sync failed", error);
-        updateCloudStatus("上传失败");
-        if (options.manual) alert("上传失败。请确认 token 有该仓库 Contents 读写权限。");
+        const message = error.userMessage || error.message || "未知错误";
+        updateCloudStatus(`上传失败：${message}`);
+        if (options.manual) {
+          alert(`上传失败：${message}\n\n如果你刚刚重新生成或修改了 token，请重新点击“连接云端”，把新 token 粘贴进去。`);
+        }
       }
     }
 
@@ -4538,6 +4541,7 @@
           method: "GET"
         });
       } catch (error) {
+        if (error.status && error.status !== 404) throw error;
         return null;
       }
     }
@@ -4552,10 +4556,24 @@
           ...(options && options.headers ? options.headers : {})
         }
       });
-      if (!response.ok) {
-        throw new Error(`GitHub API ${response.status}`);
+      const text = await response.text();
+      let payload = {};
+      if (text) {
+        try {
+          payload = JSON.parse(text);
+        } catch (error) {
+          payload = { message: text };
+        }
       }
-      return response.json();
+      if (!response.ok) {
+        const message = payload.message || response.statusText || "GitHub API error";
+        const error = new Error(`GitHub API ${response.status}: ${message}`);
+        error.status = response.status;
+        error.details = payload;
+        error.userMessage = `GitHub ${response.status}：${message}`;
+        throw error;
+      }
+      return payload;
     }
 
     function encodeBase64Utf8(value) {
