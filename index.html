@@ -3919,6 +3919,9 @@
     let viewedMonth = new Date();
     let saveTimer = 0;
     let cloudSaveTimer = 0;
+    let cloudSyncPromise = null;
+    let cloudSyncQueued = false;
+    let cloudSyncQueuedManual = false;
 
     const navList = document.getElementById("navList");
     const avatarInput = document.getElementById("avatarInput");
@@ -4499,19 +4502,44 @@
       renderMemos();
     }
 
-    async function syncCloudState(options = {}) {
+    function syncCloudState(options = {}) {
       if (!hasGithubConfig()) {
         if (options.manual) alert("请先点击“连接云端”，填写 GitHub 仓库和 token。");
         updateCloudStatus("请先连接云端");
         return;
       }
+
+      if (cloudSyncPromise) {
+        cloudSyncQueued = true;
+        if (options.manual) {
+          cloudSyncQueuedManual = true;
+          updateCloudStatus("已有上传进行中，完成后会继续上传最新内容...");
+        }
+        return cloudSyncPromise;
+      }
+
+      cloudSyncPromise = performCloudSync(options).finally(() => {
+        cloudSyncPromise = null;
+        const queued = cloudSyncQueued;
+        const queuedManual = cloudSyncQueuedManual;
+        cloudSyncQueued = false;
+        cloudSyncQueuedManual = false;
+        if (queued) {
+          syncCloudState({ manual: queuedManual });
+        }
+      });
+      return cloudSyncPromise;
+    }
+
+    async function performCloudSync(options = {}) {
       try {
         updateCloudStatus("正在上传云端...");
         const currentFile = await getCloudFileSha();
+        const uploadState = clone(state);
         const backup = {
           version: 1,
           updatedAt: new Date().toISOString(),
-          data: state
+          data: uploadState
         };
         const body = {
           message: `Update moonsun site data ${new Date().toISOString()}`,
@@ -4533,24 +4561,22 @@
     }
 
     async function putCloudFileWithRetry(body) {
-      try {
-        return await githubRequest(`contents/${CLOUD_DATA_FILE}`, {
-          method: "PUT",
-          body: JSON.stringify(body)
-        });
-      } catch (error) {
-        const message = error.userMessage || error.message || "";
-        if (error.status === 422 && message.includes("sha")) {
-          const publicFile = await getCloudFileSha({ publicRead: true });
-          if (publicFile && publicFile.sha) {
-            body.sha = publicFile.sha;
-            return githubRequest(`contents/${CLOUD_DATA_FILE}`, {
-              method: "PUT",
-              body: JSON.stringify(body)
-            });
-          }
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          return await githubRequest(`contents/${CLOUD_DATA_FILE}`, {
+            method: "PUT",
+            body: JSON.stringify(body)
+          });
+        } catch (error) {
+          const message = error.userMessage || error.message || "";
+          const canRefreshSha = error.status === 409 ||
+            (error.status === 422 && message.toLowerCase().includes("sha"));
+          if (!canRefreshSha || attempt === 2) throw error;
+
+          const latestFile = await getCloudFileSha();
+          if (!latestFile || !latestFile.sha) throw error;
+          body.sha = latestFile.sha;
         }
-        throw error;
       }
     }
 
