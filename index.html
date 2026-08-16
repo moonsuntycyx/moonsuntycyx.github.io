@@ -3470,6 +3470,25 @@
       }
     }
 
+    .section-head {
+      flex-wrap: wrap;
+    }
+
+    .section-head > div:first-child {
+      flex: 1 1 26rem;
+      min-width: min(100%, 26rem);
+    }
+
+    .section-title {
+      max-width: 100%;
+      overflow-wrap: normal;
+      word-break: normal;
+    }
+
+    .add-tools {
+      flex: 0 1 auto;
+    }
+
     @media (max-width: 1180px) {
       .carousel-inner {
         grid-template-columns: 1fr;
