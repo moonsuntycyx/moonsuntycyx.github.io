@@ -4473,9 +4473,7 @@
         const file = await githubRequest(`contents/${CLOUD_DATA_FILE}?ref=${encodeURIComponent(githubConfig.branch)}`, {
           method: "GET"
         });
-        if (!file || !file.content) throw new Error("No cloud data");
-        const decoded = decodeBase64Utf8(file.content);
-        const cloud = JSON.parse(decoded);
+        const cloud = await readCloudDataFile(file);
         applyCloudData(cloud, options);
         updateCloudStatus("云端数据已读取");
       } catch (error) {
@@ -4486,6 +4484,21 @@
           updateCloudStatus();
         }
       }
+    }
+
+    async function readCloudDataFile(file) {
+      if (file && file.content && file.encoding !== "none") {
+        return JSON.parse(decodeBase64Utf8(file.content));
+      }
+
+      const rawCloud = await githubRequest(`contents/${CLOUD_DATA_FILE}?ref=${encodeURIComponent(githubConfig.branch)}`, {
+        method: "GET",
+        headers: {
+          "Accept": "application/vnd.github.raw+json"
+        }
+      });
+      if (rawCloud && rawCloud.data) return rawCloud;
+      throw new Error("No cloud data");
     }
 
     function applyCloudData(cloud, options = {}) {
